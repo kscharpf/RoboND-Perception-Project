@@ -37,23 +37,128 @@ You're reading it!
 ### Exercise 1, 2 and 3 pipeline implemented
 #### 1. Complete Exercise 1 steps. Pipeline for filtering and RANSAC plane fitting implemented.
 
-I implemented the first layer of filtering I used was the statistical outlier filter using an average of 100 nearest points with the tolerance set to 0.5. Both of these were derived via experimentation. 
+I implemented the first layer of filtering I used was the statistical outlier filter using an average of 100 nearest points with the tolerance set to 0.5. Both of these were derived via experimentation. The statistical outlier filter is applied in the pcl_callback function of project_TEMPLATE.PY.
 
-The second step was to apply voxel grid downsampling. I used a leaf size of 0.01.
+	    outlier_filter = cloud.make_statistical_outlier_filter()
+	
+	    # Set the number of neighboring points to analyze for any given point
+	    outlier_filter.set_mean_k(100)
+	
+	    # Set threshold scale factor - orig 1.0
+	    x = 0.5
+	
+	    # Any point with a mean distance larger than global (mean distance+x*std_dev) will be considered outlier
+	    outlier_filter.set_std_dev_mul_thresh(x)
+	
+	    # Finally call the filter function for magic
+	    cloud = outlier_filter.filter()
 
-The third step I used was to apply two passthrough filters. The first of these is a z-axis passthrough from 0.6 to 0.9 and the second was a y-axis passthrough from -0.5 to 0.5. The second filter was necessary to avoid the pipeline from attempting to recognize the robot arms.
+
+The second step was to apply voxel grid downsampling. I used a leaf size of 0.01. The downsampling is defined in the pcl_callback function of project_template.py
+
+	    # TODO: Voxel Grid Downsampling
+	    LEAF_SIZE = 0.01
+	    #vox = cloud_filtered.make_voxel_grid_filter()
+	    vox = cloud.make_voxel_grid_filter()
+	    vox.set_leaf_size(LEAF_SIZE, LEAF_SIZE, LEAF_SIZE) 
+	 
+	    # Call the filter function to obtain the resultant downsampled point cloud
+	    cloud_filtered = vox.filter()
+
+The third step I used was to apply two passthrough filters. The first of these is a z-axis passthrough from 0.6 to 0.9 and the second was a y-axis passthrough from -0.5 to 0.5. The second filter was necessary to avoid the pipeline from attempting to recognize the robot arms. The passthrough filters are defined in the pcl_callback function of project_template.py.
+
+	    # TODO: PassThrough Filter
+	    passthrough = cloud_filtered.make_passthrough_filter()
+	    filter_axis = 'z'
+	    passthrough.set_filter_field_name(filter_axis)
+	    axis_min = 0.6
+	    axis_max = 0.9
+	    passthrough.set_filter_limits(axis_min,axis_max)
+	  
+	    cloud_filtered = passthrough.filter()
+	    passthrough = cloud_filtered.make_passthrough_filter()
+	    filter_axis = 'y'
+	    passthrough.set_filter_field_name(filter_axis)
+	    axis_min = -0.5
+	    axis_max =  0.5
+	    passthrough.set_filter_limits(axis_min,axis_max)
+	  
+	    cloud_filtered = passthrough.filter()
 
 #### 2. Complete Exercise 2 steps: Pipeline including clustering for segmentation implemented.  
-The objects are the outliers following RANSAC plane segmentation and are shown below.
+RANSAC plane segmentation and the identification of inliers and outliers is implemented in the pcl_callback function of project_template.py.
+
+	    seg = cloud_filtered.make_segmenter()
+	    seg.set_model_type(pcl.SACMODEL_PLANE)
+	    seg.set_method_type(pcl.SAC_RANSAC)
+	 
+	    max_distance = 0.01
+	    seg.set_distance_threshold(max_distance)
+	  
+	    # TODO: Extract inliers and outliers
+	    inliers, coefficients = seg.segment()
+	    cloud_table = cloud_filtered.extract(inliers, negative=False)
+	    if first_exec:
+	        pcl.save(cloud_table, "inliers.pcd")
+	    cloud_objects = cloud_filtered.extract(inliers, negative=True)
+	    if first_exec:
+	        pcl.save(cloud_objects, "outliers.pcd")
+The objects are the outliers following RANSAC plane segmentation and are shown below. 
 ![segmented objects](./output_3_objects.png  "Objects After Plane Segmentation")
 The inliers following RANSAC plane segmentation forms the table and is shown below.
 ![segmented table](./output_3_table.png "Table After Plane Segmentation")
-Next, the pipeline takes the objects just identified and performs euclidean clustering using a tolerance of 0.015, a minimum cluster size of 50 and a maximum cluster size of 2500.
-![clusters](./output_3_clusters.png "Clusters")
+Next, the pipeline takes the objects just identified and performs euclidean clustering using a tolerance of 0.015, a minimum cluster size of 50 and a maximum cluster size of 2500. The clustering is completed within the pcl_callback function of project_template.py.
 
+	    # TODO: Euclidean Clustering
+	    white_cloud = XYZRGB_to_XYZ(cloud_objects)
+	    tree = white_cloud.make_kdtree()
+	    ec = white_cloud.make_EuclideanClusterExtraction()
+	    ec.set_ClusterTolerance(0.015)
+	    ec.set_MinClusterSize(50)
+	    ec.set_MaxClusterSize(2500)
+	    ec.set_SearchMethod(tree)
+	
+	    cluster_indices = ec.Extract()
+	
+	    # TODO: Create Cluster-Mask Point Cloud to visualize each cluster separately
+	    cluster_color = get_color_list(len(cluster_indices))
+	    color_cluster_point_list = []
+	
+	    for j, indices in enumerate(cluster_indices):
+	        for i, indice in enumerate(indices):
+	            color_cluster_point_list.append([white_cloud[indice][0],
+	                                             white_cloud[indice][1],
+	                                             white_cloud[indice][2],
+	                                             rgb_to_float(cluster_color[j])])
+	
+	    cluster_cloud = pcl.PointCloud_PointXYZRGB()
+	    cluster_cloud.from_list(color_cluster_point_list)
+![clusters](./output_3_clusters.png "Clusters")
+	
 #### 2. Complete Exercise 3 Steps.  Features extracted and SVM trained.  Object recognition implemented.
 
-I trained the SVM using 100 random samples of each of the 8 objects defined in pick_place_3.yaml. The features were extracted using HSV rather than RGB.
+I trained the SVM using 100 random samples of each of the 8 objects defined in pick_place_3.yaml. The features were extracted using HSV rather than RGB. Snippet indicating capture logic from capture_features.py:
+
+	        for i in range(100):
+	            print "Showing %s i: %d" % (model_name, i)
+	            # make five attempts to get a valid a point cloud then give up
+	            sample_was_good = False
+	            try_count = 0
+	            while not sample_was_good and try_count < 5:
+	                sample_cloud = capture_sample()
+	                sample_cloud_arr = ros_to_pcl(sample_cloud).to_array()
+	
+	                # Check for invalid clouds.
+	                if sample_cloud_arr.shape[0] == 0:
+	                    print('Invalid cloud detected')
+	                    try_count += 1
+	                else:
+	                    sample_was_good = True
+
+
+The color histograms and normals are calculated in features.py: compute_color_histograms and compute_normal_histograms.
+
+Here are the results of training:
 
 	kevin@kevin-XPS-13-9365:~/catkin_ws$ python ./src/sensor_stick/scripts/train_svm.py 
 	/home/kevin/.local/lib/python2.7/site-packages/sklearn/cross_validation.py:41: DeprecationWarning: This module was deprecated in version 0.18 in favor of the model_selection module into which all the refactored classes and functions are moved. Also note that the interface of the new CV iterators are different from that of this module. This module will be removed in 0.20.
@@ -69,6 +174,58 @@ Here is the unnormalized confusion matrix
 
 And here is the resulting normalized confusion matrix:
 ![normalized confusion matrix](./confusion_matrix_normalized.png "Normalized Confusion Matrix")
+
+*Note that capture_features.py, features.py, and train_svm.py were run out of the sensor_stick environment. I have copied these scripts into the pr2_robot/scripts directory for the purposes of review.*
+
+The complete perception pipeline exists in the pcl_callback function in project_template.py. The calculation of centroid, identification of target box, and output to yaml is defined in the pr2_mover function in project_template.py.
+
+    centroids = {}
+    for object in object_list:
+        points_arr = ros_to_pcl(object.cloud).to_array()
+        centroids[object.label] = np.mean(points_arr, axis=0)[:3]
+        
+and the assignment of centroid / box to each object in order
+
+	    test_scene_num = Int32()
+	    test_scene_num.data = scene_num
+	 
+	    for i in range(0, len(object_list_param)):
+	        object_name = String()
+	        object_name.data = object_list_param[i]['name']
+	        object_group = object_list_param[i]['group']
+	        if not centroids.has_key(object_name.data):
+	            continue
+	
+	        # TODO: Create 'place_pose' for the object
+	        pick_pose = Pose()
+	        pick_pose.position.x = np.asscalar(centroids[object_name.data][0])
+	        pick_pose.position.y = np.asscalar(centroids[object_name.data][1])
+	        pick_pose.position.z = np.asscalar(centroids[object_name.data][2])
+	        pick_pose.orientation.x = 0.
+	        pick_pose.orientation.y = 0.
+	        pick_pose.orientation.z = 0.
+	        pick_pose.orientation.w = 0.
+	        place_pose = Pose()
+	        place_pose.orientation.x = 0.
+	        place_pose.orientation.y = 0.
+	        place_pose.orientation.z = 0.
+	        place_pose.orientation.w = 0.
+	
+	        arm_name = String()
+	        # TODO: Assign the arm to be used for pick_place
+	        for d in dropbox_list_param:
+	            if d['group'] == object_group:
+	                arm_name.data = d['name']
+	                place_pose.position.x = d['position'][0]
+	                place_pose.position.y = d['position'][1]
+	                place_pose.position.z = d['position'][2]
+	                break
+	
+	        # TODO: Create a list of dictionaries (made with make_yaml_dict()) for later output to yaml format
+	        # Populate various ROS messages
+	        yaml_dict = make_yaml_dict(test_scene_num, arm_name, object_name, pick_pose, place_pose)
+	        dict_list.append(yaml_dict)
+	
 
 ### Pick and Place Setup
 
