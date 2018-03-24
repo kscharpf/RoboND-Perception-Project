@@ -6,8 +6,8 @@ import sklearn
 from sklearn.preprocessing import LabelEncoder
 import pickle
 from sensor_stick.srv import GetNormals
-from sensor_stick.features import compute_color_histograms
-from sensor_stick.features import compute_normal_histograms
+from features import compute_color_histograms
+from features import compute_normal_histograms
 from visualization_msgs.msg import Marker
 from sensor_stick.marker_tools import *
 from sensor_stick.msg import DetectedObjectsArray
@@ -70,7 +70,7 @@ def pcl_callback(pcl_msg):
     cloud = outlier_filter.filter()
 
     # TODO: Voxel Grid Downsampling
-    LEAF_SIZE = 0.01
+    LEAF_SIZE = 0.005
     #vox = cloud_filtered.make_voxel_grid_filter()
     vox = cloud.make_voxel_grid_filter()
     vox.set_leaf_size(LEAF_SIZE, LEAF_SIZE, LEAF_SIZE) 
@@ -176,13 +176,18 @@ def pcl_callback(pcl_msg):
         chists = compute_color_histograms(ros_cluster, using_hsv=True)
         normals = get_normals(ros_cluster)
         nhists = compute_normal_histograms(normals)
+        #print "%s" % nhists
         feature = np.concatenate((chists, nhists))
         #detected_objects_labels.append([feature, model_name])
 
         # Make the prediction, retrieve the label for the result
         # and add it to detected_objects_labels list
-        prediction = clf.predict(scaler.transform(feature.reshape(1,-1)))
+        input_features = scaler.transform(feature.reshape(1,-1))
+        prediction = clf.predict(input_features)
+        #prediction = clf.predict(scaler.transform(feature.reshape(1,-1)))
         print "prediction: %s" % str(prediction)
+        probabilities = clf.predict_proba(input_features)
+        print "probability predictions: %s" % str(probabilities)
         label = encoder.inverse_transform(prediction)[0]
         detected_objects_labels.append(label)
 
