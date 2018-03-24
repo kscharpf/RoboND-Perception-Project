@@ -54,10 +54,10 @@ I implemented the first layer of filtering I used was the statistical outlier fi
 	    cloud = outlier_filter.filter()
 
 
-The second step was to apply voxel grid downsampling. I used a leaf size of 0.01. The downsampling is defined in the pcl_callback function of project_template.py
+The second step was to apply voxel grid downsampling. I used a leaf size of 0.005. The downsampling is defined in the pcl_callback function of project_template.py
 
 	    # TODO: Voxel Grid Downsampling
-	    LEAF_SIZE = 0.01
+	    LEAF_SIZE = 0.005
 	    #vox = cloud_filtered.make_voxel_grid_filter()
 	    vox = cloud.make_voxel_grid_filter()
 	    vox.set_leaf_size(LEAF_SIZE, LEAF_SIZE, LEAF_SIZE) 
@@ -84,6 +84,9 @@ The third step I used was to apply two passthrough filters. The first of these i
 	    passthrough.set_filter_limits(axis_min,axis_max)
 	  
 	    cloud_filtered = passthrough.filter()
+	    
+Here is the output from the passthrough filter:
+![pass through filter](/home/kevin/RoboND-Perception-Project/output_3_passthrough.png  "Passthrough Filter Image")
 
 #### 2. Complete Exercise 2 steps: Pipeline including clustering for segmentation implemented.  
 RANSAC plane segmentation and the identification of inliers and outliers is implemented in the pcl_callback function of project_template.py.
@@ -137,9 +140,12 @@ Next, the pipeline takes the objects just identified and performs euclidean clus
 	
 #### 2. Complete Exercise 3 Steps.  Features extracted and SVM trained.  Object recognition implemented.
 
-I trained the SVM using 100 random samples of each of the 8 objects defined in pick_place_3.yaml. The features were extracted using HSV rather than RGB. Snippet indicating capture logic from capture_features.py:
+I trained the SVM using 1000 random samples of each of the 8 objects defined in pick_place_3.yaml. The features were extracted using HSV rather than RGB. The classifier uses a linear kernel. Snippet indicating capture logic from capture_features.py:
 
-	        for i in range(100):
+	    for model_name in models:
+	        spawn_model(model_name)
+	
+	        for i in range(1000):
 	            print "Showing %s i: %d" % (model_name, i)
 	            # make five attempts to get a valid a point cloud then give up
 	            sample_was_good = False
@@ -154,20 +160,61 @@ I trained the SVM using 100 random samples of each of the 8 objects defined in p
 	                    try_count += 1
 	                else:
 	                    sample_was_good = True
+	
+	            # Extract histogram features
+	            chists = compute_color_histograms(sample_cloud, using_hsv=True)
+	            normals = get_normals(sample_cloud)
+	            nhists = compute_normal_histograms(normals)
+	            feature = np.concatenate((chists, nhists))
+	            labeled_features.append([feature, model_name])
 
 
 The color histograms and normals are calculated in features.py: compute_color_histograms and compute_normal_histograms.
+Color histogram calculation:
 
+		    channel_1_hist = np.histogram(channel_1_vals, bins=64, range=(0,256))
+		    channel_2_hist = np.histogram(channel_2_vals, bins=64, range=(0,256))
+		    channel_3_hist = np.histogram(channel_3_vals, bins=64, range=(0,256))
+		
+		    # TODO: Concatenate and normalize the histograms
+		    #print "channel_1_hist[0]: %s" % channel_1_hist[0]
+		    hist_features = np.concatenate((channel_1_hist[0], channel_2_hist[0], channel_3_hist[0])).astype(np.float64)
+		    # Generate random features for demo mode.  
+		    # Replace normed_features with your feature vector
+		    #normed_features = np.random.random(96) 
+		    normed_features = hist_features / np.sum(hist_features)
+		    return normed_features 
+	  
+Surface normal histogram calculation:
+
+	    for norm_component in pc2.read_points(normal_cloud,
+	                                          field_names = ('normal_x', 'normal_y', 'normal_z'),
+	                                          skip_nans=True):
+	        #print "norm_component: %f %f %f" % (norm_component[0], norm_component[1], norm_component[2])
+	        norm_x_vals.append(norm_component[0])
+	        norm_y_vals.append(norm_component[1])
+	        norm_z_vals.append(norm_component[2])
+	
+	    # TODO: Compute histograms of normal values (just like with color)
+	    x_hist = np.histogram(norm_x_vals, bins=64, range=(-1,1))
+	    y_hist = np.histogram(norm_y_vals, bins=64, range=(-1,1))
+	    z_hist = np.histogram(norm_z_vals, bins=64, range=(-1,1))
+	
+	    # TODO: Concatenate and normalize the histograms
+	    hist_features = np.concatenate((x_hist[0], y_hist[0], z_hist[0])).astype(np.float64)
+	    normed_features = hist_features / np.sum(hist_features)
+	    return normed_features
+	
 Here are the results of training:
 
-	kevin@kevin-XPS-13-9365:~/catkin_ws$ python ./src/sensor_stick/scripts/train_svm.py 
+	kevin@kevin-XPS-13-9365:~/catkin_ws$ python ./src/RoboND-Perception-Project/pr2_robot/scripts/train_svm.py 
 	/home/kevin/.local/lib/python2.7/site-packages/sklearn/cross_validation.py:41: DeprecationWarning: This module was deprecated in version 0.18 in favor of the model_selection module into which all the refactored classes and functions are moved. Also note that the interface of the new CV iterators are different from that of this module. This module will be removed in 0.20.
 	  "This module will be removed in 0.20.", DeprecationWarning)
-	Features in Training Set: 800
-	Invalid Features in Training set: 1
-	Scores: [0.96875    0.96875    0.95       0.95       0.96855346]
-	Accuracy: 0.96 (+/- 0.02)
-	accuracy score: 0.9612015018773467
+	Features in Training Set: 8000
+	Invalid Features in Training set: 0
+	Scores: [0.971875 0.974375 0.965    0.978125 0.9725  ]
+	Accuracy: 0.97 (+/- 0.01)
+
 
 Here is the unnormalized confusion matrix
 ![unnormalized confusion matrix](./confusion_matrix_unnormalized.png  "Unnormalized Confusion Matrix")
@@ -175,6 +222,7 @@ Here is the unnormalized confusion matrix
 And here is the resulting normalized confusion matrix:
 ![normalized confusion matrix](./confusion_matrix_normalized.png "Normalized Confusion Matrix")
 
+As an experiment, I tried to see the effect of the rbf kernel instead but the results on the project were worse despite producing better output in the confusion matrix. 
 *Note that capture_features.py, features.py, and train_svm.py were run out of the sensor_stick environment. I have copied these scripts into the pr2_robot/scripts directory for the purposes of review.*
 
 The complete perception pipeline exists in the pcl_callback function in project_template.py. The calculation of centroid, identification of target box, and output to yaml is defined in the pr2_mover function in project_template.py.
@@ -233,7 +281,7 @@ and the assignment of centroid / box to each object in order
 
 Test world 1 has three objects and the system correctly recognized all three.
 
-	kevin@kevin-XPS-13-9365:~/catkin_ws$ cat output_1.yaml
+	kevin@kevin-XPS-13-9365:~/catkin_ws$ cat output_1.yaml 
 	object_list:
 	- arm_name: right
 	  object_name: biscuits
@@ -244,9 +292,9 @@ Test world 1 has three objects and the system correctly recognized all three.
 	      y: 0.0
 	      z: 0.0
 	    position:
-	      x: 0.5423681735992432
-	      y: -0.24249814450740814
-	      z: 0.7058090567588806
+	      x: 0.5416092872619629
+	      y: -0.2414039522409439
+	      z: 0.7053749561309814
 	  place_pose:
 	    orientation:
 	      w: 0.0
@@ -267,9 +315,9 @@ Test world 1 has three objects and the system correctly recognized all three.
 	      y: 0.0
 	      z: 0.0
 	    position:
-	      x: 0.5429043769836426
-	      y: -0.020432645455002785
-	      z: 0.6749045848846436
+	      x: 0.5450282692909241
+	      y: -0.018413478508591652
+	      z: 0.6766939759254456
 	  place_pose:
 	    orientation:
 	      w: 0.0
@@ -290,9 +338,9 @@ Test world 1 has three objects and the system correctly recognized all three.
 	      y: 0.0
 	      z: 0.0
 	    position:
-	      x: 0.4455723762512207
-	      y: 0.22249090671539307
-	      z: 0.6777292490005493
+	      x: 0.4449080228805542
+	      y: 0.22129249572753906
+	      z: 0.6762093901634216
 	  place_pose:
 	    orientation:
 	      w: 0.0
@@ -305,10 +353,12 @@ Test world 1 has three objects and the system correctly recognized all three.
 	      z: 0.605
 	  test_scene_num: 1
 	
+
+	
 and produced the following labeled image
 ![test world 1](./output_1.png  "Test World 1 Labels")
 
-Test world 2 consists of 5 objects that must be labeled. The script correctly labeled 4 of the 5 objects. The book was mislabeled as "sticky notes".
+Test world 2 consists of 5 objects that must be labeled. The script correctly labeled 5 of the 5 objects. 
 
 	kevin@kevin-XPS-13-9365:~/catkin_ws$ cat output_2.yaml 
 	object_list:
@@ -321,9 +371,9 @@ Test world 2 consists of 5 objects that must be labeled. The script correctly la
 	      y: 0.0
 	      z: 0.0
 	    position:
-	      x: 0.5721270442008972
-	      y: -0.2483142912387848
-	      z: 0.7050341963768005
+	      x: 0.5712485909461975
+	      y: -0.2478954792022705
+	      z: 0.7054320573806763
 	  place_pose:
 	    orientation:
 	      w: 0.0
@@ -344,9 +394,9 @@ Test world 2 consists of 5 objects that must be labeled. The script correctly la
 	      y: 0.0
 	      z: 0.0
 	    position:
-	      x: 0.5612208843231201
-	      y: 0.003559722099453211
-	      z: 0.6747649312019348
+	      x: 0.5601434707641602
+	      y: 0.003147885436192155
+	      z: 0.6766631007194519
 	  place_pose:
 	    orientation:
 	      w: 0.0
@@ -359,6 +409,29 @@ Test world 2 consists of 5 objects that must be labeled. The script correctly la
 	      z: 0.605
 	  test_scene_num: 2
 	- arm_name: left
+	  object_name: book
+	  pick_pose:
+	    orientation:
+	      w: 0.0
+	      x: 0.0
+	      y: 0.0
+	      z: 0.0
+	    position:
+	      x: 0.5789046883583069
+	      y: 0.280473917722702
+	      z: 0.7228950262069702
+	  place_pose:
+	    orientation:
+	      w: 0.0
+	      x: 0.0
+	      y: 0.0
+	      z: 0.0
+	    position:
+	      x: 0
+	      y: 0.71
+	      z: 0.605
+	  test_scene_num: 2
+	- arm_name: left
 	  object_name: soap2
 	  pick_pose:
 	    orientation:
@@ -367,9 +440,9 @@ Test world 2 consists of 5 objects that must be labeled. The script correctly la
 	      y: 0.0
 	      z: 0.0
 	    position:
-	      x: 0.44436946511268616
-	      y: 0.22782032191753387
-	      z: 0.6766523718833923
+	      x: 0.44437068700790405
+	      y: 0.22667980194091797
+	      z: 0.6764086484909058
 	  place_pose:
 	    orientation:
 	      w: 0.0
@@ -390,9 +463,9 @@ Test world 2 consists of 5 objects that must be labeled. The script correctly la
 	      y: 0.0
 	      z: 0.0
 	    position:
-	      x: 0.6312219500541687
-	      y: 0.1304948478937149
-	      z: 0.6783496737480164
+	      x: 0.6309707760810852
+	      y: 0.13058094680309296
+	      z: 0.6787865161895752
 	  place_pose:
 	    orientation:
 	      w: 0.0
@@ -404,182 +477,210 @@ Test world 2 consists of 5 objects that must be labeled. The script correctly la
 	      y: 0.71
 	      z: 0.605
 	  test_scene_num: 2
+
 	
 and produced the following image:
 
 ![Test World 2](./output_2.png  "World 2 Labels")
 
-Finally, world3 consists of 8 objects and the system correctly labeled 7 of the 8 objects as the glue is partially obscured. Here is the yaml output:
+Finally, world3 consists of 8 objects and the system correctly labeled 8 of the 8 objects. Here is the yaml output:
 
-	kevin@kevin-XPS-13-9365:~/catkin_ws$ cat output_3.yaml 
-	object_list:
-	- arm_name: left
-	  object_name: sticky_notes
-	  pick_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0.6107159852981567
-	      y: 0.14323653280735016
-	      z: 0.680168867111206
-	  place_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0
-	      y: 0.71
-	      z: 0.605
-	  test_scene_num: 3
-	- arm_name: left
-	  object_name: book
-	  pick_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0.493094265460968
-	      y: 0.08385253697633743
-	      z: 0.7260696887969971
-	  place_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0
-	      y: 0.71
-	      z: 0.605
-	  test_scene_num: 3
-	- arm_name: right
-	  object_name: snacks
-	  pick_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0.42909112572669983
-	      y: -0.3358733057975769
-	      z: 0.7502352595329285
-	  place_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0
-	      y: -0.71
-	      z: 0.605
-	  test_scene_num: 3
-	- arm_name: right
-	  object_name: biscuits
-	  pick_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0.5896818041801453
-	      y: -0.21977226436138153
-	      z: 0.7046037912368774
-	  place_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0
-	      y: -0.71
-	      z: 0.605
-	  test_scene_num: 3
-	- arm_name: left
-	  object_name: eraser
-	  pick_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0.6085931062698364
-	      y: 0.28082743287086487
-	      z: 0.646692156791687
-	  place_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0
-	      y: 0.71
-	      z: 0.605
-	  test_scene_num: 3
-	- arm_name: right
-	  object_name: soap2
-	  pick_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0.45518794655799866
-	      y: -0.044892147183418274
-	      z: 0.6752803921699524
-	  place_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0
-	      y: -0.71
-	      z: 0.605
-	  test_scene_num: 3
-	- arm_name: right
-	  object_name: soap
-	  pick_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0.6793416142463684
-	      y: 0.00394031498581171
-	      z: 0.6752172112464905
-	  place_pose:
-	    orientation:
-	      w: 0.0
-	      x: 0.0
-	      y: 0.0
-	      z: 0.0
-	    position:
-	      x: 0
-	      y: -0.71
-	      z: 0.605
-	  test_scene_num: 3
+		kevin@kevin-XPS-13-9365:~/catkin_ws$ cat output_3.yaml 
+		object_list:
+		- arm_name: left
+		  object_name: sticky_notes
+		  pick_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0.43965840339660645
+		      y: 0.21510088443756104
+		      z: 0.6861762404441833
+		  place_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0
+		      y: 0.71
+		      z: 0.605
+		  test_scene_num: 3
+		- arm_name: left
+		  object_name: book
+		  pick_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0.4925074875354767
+		      y: 0.08395363390445709
+		      z: 0.7267417907714844
+		  place_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0
+		      y: 0.71
+		      z: 0.605
+		  test_scene_num: 3
+		- arm_name: right
+		  object_name: snacks
+		  pick_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0.42672255635261536
+		      y: -0.33367329835891724
+		      z: 0.7533994317054749
+		  place_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0
+		      y: -0.71
+		      z: 0.605
+		  test_scene_num: 3
+		- arm_name: right
+		  object_name: biscuits
+		  pick_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0.588325023651123
+		      y: -0.218833789229393
+		      z: 0.7053137421607971
+		  place_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0
+		      y: -0.71
+		      z: 0.605
+		  test_scene_num: 3
+		- arm_name: left
+		  object_name: eraser
+		  pick_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0.6080653071403503
+		      y: 0.2820051908493042
+		      z: 0.6472211480140686
+		  place_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0
+		      y: 0.71
+		      z: 0.605
+		  test_scene_num: 3
+		- arm_name: right
+		  object_name: soap2
+		  pick_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0.45350995659828186
+		      y: -0.043533604592084885
+		      z: 0.6761820912361145
+		  place_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0
+		      y: -0.71
+		      z: 0.605
+		  test_scene_num: 3
+		- arm_name: right
+		  object_name: soap
+		  pick_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0.6790318489074707
+		      y: 0.004095396958291531
+		      z: 0.6763603091239929
+		  place_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0
+		      y: -0.71
+		      z: 0.605
+		  test_scene_num: 3
+		- arm_name: left
+		  object_name: glue
+		  pick_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0.6115730404853821
+		      y: 0.14189209043979645
+		      z: 0.6838186383247375
+		  place_pose:
+		    orientation:
+		      w: 0.0
+		      x: 0.0
+		      y: 0.0
+		      z: 0.0
+		    position:
+		      x: 0
+		      y: 0.71
+		      z: 0.605
+		  test_scene_num: 3
+
+	
 
 And, finally, here is the labeled output from test world 3.
 ![test world 3](./output_3b.png  "Test World 3 Labels")
 
 ##Results Discussion
-The object recognition worked well but was not perfect. Most notably, world 3 produced the glue object in a partially occluded setting. In such an instance, the results of the object recognition would probably be better had I completed the delivery of the objects into the respective boxes. After delivery of the occluding object, a clear view of the occluded object is possible resulting in likely a much better point cloud. 
+The object recognition worked well but was not perfect. In particular, a single run of the process will continuously generate new labels. Sometimes not all objects were detected. Sometimes an object was mislabled. Most notably, world 3 produced the glue object in a partially occluded setting. Sometimes this object would be mislabeled. In such an instance, the results of the object recognition would probably be better had I completed the delivery of the objects into the respective boxes. After delivery of the occluding object, a clear view of the occluded object is possible resulting in likely a much better point cloud. 
 
-I believe there are two other areas of potential improvement. First, this project seems to result in the generation of exactly 1 of each object available within the world. If I change the pipeline to make that assumption, then I would not simply accept the prediction from the classifier. Instead, I would pick the best result for each object. Such an approach may well lead to a perfect score but in another sense the pipeline is now more sensitive to the operating environment. A second area of improvement that I do not believe would be wise to implement is to train different SVCs for each world. Doing so means that in world 2 there is likely no way that the book would be mislabeled as sticky notes. This approach is very brittle as the operator needs to know the correct operating environment of the robot prior to start. That solution seems quite unwise. 
+Another area of potential improvement is to have the algorithm make the assumption that there is only 1 of each object available within the world. This assumption is certainly true in the test scenarios. With this assumption, we would pick the best example of the given target object and then exclude that object as a possible answer for all other labels. I took a step towards this solution by training the classifier with the probability flag set and generating the output of the predict_proba rather than just the predict output. However, with correct labels for all objects I determined this last step was unnecessary and left it as an avenue for future exploration.
+
+
 
