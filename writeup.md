@@ -683,4 +683,3 @@ The object recognition worked well but was not perfect. In particular, a single 
 Another area of potential improvement is to have the algorithm make the assumption that there is only 1 of each object available within the world. This assumption is certainly true in the test scenarios. With this assumption, we would pick the best example of the given target object and then exclude that object as a possible answer for all other labels. I took a step towards this solution by training the classifier with the probability flag set and generating the output of the predict_proba rather than just the predict output. However, with correct labels for all objects I determined this last step was unnecessary and left it as an avenue for future exploration.
 
 
-
