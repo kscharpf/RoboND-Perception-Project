@@ -86,7 +86,7 @@ The third step I used was to apply two passthrough filters. The first of these i
 	    cloud_filtered = passthrough.filter()
 	    
 Here is the output from the passthrough filter:
-![pass through filter](./RoboND-Perception-Project/output_3_passthrough.png  "Passthrough Filter Image")
+![pass through filter](./output_3_passthrough.png  "Passthrough Filter Image")
 
 #### 2. Complete Exercise 2 steps: Pipeline including clustering for segmentation implemented.  
 RANSAC plane segmentation and the identification of inliers and outliers is implemented in the pcl_callback function of project_template.py.
